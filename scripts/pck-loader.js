@@ -1,4 +1,4 @@
-function loadSplitPck(engine) {
+function loadSplitPck(engine, manifest) {
     const preload = engine.preloadFile;
 
     engine.preloadFile = async function (file, path) {
@@ -6,11 +6,6 @@ function loadSplitPck(engine) {
             return preload.call(this, file, path);
         }
 
-        const response = await fetch('index.pck.json');
-        if (!response.ok) {
-            throw new Error(`pck manifest: http ${response.status}`);
-        }
-        const manifest = await response.json();
         if (!Number.isSafeInteger(manifest.size) || manifest.size <= 0 ||
             !Array.isArray(manifest.parts) || manifest.parts.length === 0) {
             throw new Error('invalid pck manifest');

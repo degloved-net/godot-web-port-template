@@ -22,6 +22,8 @@ cross-origin-opener-policy: same-origin
 cross-origin-embedder-policy: require-corp
 ```
 
+`sh scripts/split-pck.sh` splits both builds into 20 mb pack parts
+
 ## changes
 
 make changes in `work/project`, then run

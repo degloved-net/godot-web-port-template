@@ -7,65 +7,72 @@ fi
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-source "$root/scripts/paths.sh"
-if (( $# < 1 )); then
-    ask_path export_folder 'web export folder' "$root/build/web"
-else
-    export_folder="$1"
-fi
-if (( $# < 2 )); then
-    ask_path output_folder 'output folder' "$root/docs"
-else
-    output_folder="$2"
-fi
-if [[ ! -d "$export_folder" || -z "$output_folder" ]]; then
-    echo 'choose an export folder and output folder' >&2
+if (( $# )); then
+    echo 'run without arguments to split both builds' >&2
     exit 1
 fi
-source="$(realpath "$export_folder")"
-output="$(realpath -m "$output_folder")"
-part_size=20000000
 
-if [[ "$output" == "$source" || "$output" == "$source/"* || "$source" == "$output/"* ]]; then
-    echo 'use separate input and output folders' >&2
+if [[ ! -s "$root/scripts/pck-loader.js" || ! -r "$root/scripts/pck-loader.js" ]]; then
+    echo 'missing scripts/pck-loader.js' >&2
     exit 1
 fi
-if [[ -e "$output" ]]; then
-    echo "output exists: $output" >&2
-    exit 1
-fi
-for file in index.pck index.html; do
-    if [[ ! -s "$source/$file" ]]; then
-        echo "missing export: $source/$file" >&2
+
+for name in web web-threads; do
+    folder="$root/build/$name"
+    if [[ ! -s "$folder/index.html" ]]; then
+        echo "missing build: $name; run scripts/build.sh first" >&2
+        exit 1
+    fi
+    if [[ ! -s "$folder/index.pck" ]]; then
+        if [[ -s "$folder/index.pck.part-0000" ]] && grep -q 'loadSplitPck(engine, {' "$folder/index.html"; then
+            continue
+        fi
+        echo "missing pack: $name; run scripts/build.sh first" >&2
+        exit 1
+    fi
+    if ! grep -Eq "src=['\"]index\.js['\"]" "$folder/index.html" ||
+       ! grep -Eq '(const|var|let) engine = new Engine\(' "$folder/index.html"; then
+        echo "use the default godot html page: $name" >&2
         exit 1
     fi
 done
-if ! grep -Eq "src=['\"]index\.js['\"]" "$source/index.html" ||
-   ! grep -Eq '(const|var|let) engine = new Engine\(' "$source/index.html"; then
-    echo 'use the default godot html page' >&2
-    exit 1
-fi
 
-mkdir -p "$output"
-trap 'rm -rf -- "$output"' ERR
-cp -a "$source/." "$output/"
-rm -- "$output/index.pck"
-split -b "$part_size" -d -a 4 "$source/index.pck" "$output/index.pck.part-"
+html=''
+trap 'if [[ -n "$html" ]]; then rm -f -- "$html"; fi' EXIT
 
-manifest="$output/index.pck.json"
-printf '{\n  "size": %s,\n  "parts": [\n' "$(stat -c %s "$source/index.pck")" > "$manifest"
-separator=''
-for part in "$output/"index.pck.part-*; do
-    hash="$(sha256sum "$part")"
-    printf '%s    {"file": "%s", "size": %s, "sha256": "%s"}' \
-        "$separator" "$(basename "$part")" "$(stat -c %s "$part")" "${hash%% *}" >> "$manifest"
-    separator=$',\n'
+for name in web web-threads; do
+    folder="$root/build/$name"
+    if [[ ! -s "$folder/index.pck" ]]; then
+        echo "already split: $name"
+        continue
+    fi
+
+    rm -f -- "$folder/"index.pck.part-*
+    split -b 20000000 -d -a 4 "$folder/index.pck" "$folder/index.pck.part-"
+    manifest="$(
+        printf '{"size":%s,"parts":[' "$(stat -c %s "$folder/index.pck")"
+        separator=''
+        for part in "$folder/"index.pck.part-*; do
+            hash="$(sha256sum "$part")"
+            printf '%s{"file":"%s","size":%s,"sha256":"%s"}' \
+                "$separator" "$(basename "$part")" "$(stat -c %s "$part")" "${hash%% *}"
+            separator=','
+        done
+        printf ']}'
+    )"
+
+    html="$(mktemp "$folder/index.html.XXXXXX")"
+    awk -v loader="$root/scripts/pck-loader.js" -v manifest="$manifest" '
+        { print }
+        /engine = new Engine\(/ {
+            while ((getline line < loader) > 0) print line
+            close(loader)
+            print "loadSplitPck(engine, " manifest ");"
+        }
+    ' "$folder/index.html" > "$html"
+    chmod --reference="$folder/index.html" "$html"
+    mv -- "$html" "$folder/index.html"
+    html=''
+    rm -- "$folder/index.pck"
+    echo "split pack: $name"
 done
-printf '\n  ]\n}\n' >> "$manifest"
-
-cp "$root/scripts/pck-loader.js" "$output/pck-loader.js"
-touch "$output/.nojekyll"
-sed -i '/src=.*index\.js.*<\/script>/a\        <script src="pck-loader.js"></script>' "$output/index.html"
-sed -i '/engine = new Engine(/a\loadSplitPck(engine);' "$output/index.html"
-trap - ERR
-echo "split export saved to $output"
