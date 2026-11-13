@@ -44,7 +44,6 @@ for preset in web web-threads; do
 
     "$godot" --path "$project" "${export_args[@]}" "$preset" "$output/index.html" 2>&1 | tee "$log"
 
-    # Godot sometimes reports leaked resources while closing the headless editor.
     if grep -E "$errors" "$log" | grep -vE '^ERROR: ([0-9]+ (resources still in use|RID allocations)|Pages in use exist)'; then
         echo "export failed; see $log" >&2
         exit 1
@@ -58,3 +57,5 @@ for preset in web web-threads; do
     done
     echo "exported $output"
 done
+
+bash "$root/scripts/single-file.sh"

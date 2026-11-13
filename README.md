@@ -24,6 +24,18 @@ cross-origin-embedder-policy: require-corp
 
 `sh scripts/split-pck.sh` splits both builds into 20 mb pack parts
 
+## single-file builds
+
+`build.sh` also makes `build/web.html`, plus `build/web-lite.html`
+
+to bundle existing builds:
+
+```bash
+sh scripts/single-file.sh
+```
+
+needs bash, gnu tools and `jq`
+
 ## changes
 
 make changes in `work/project`, then run
